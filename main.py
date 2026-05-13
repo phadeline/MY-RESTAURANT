@@ -101,8 +101,101 @@ async def get_all_orders(page: int = 1, limit: int = 20):
 
     return list(orders.values())
 
+@app.post("/orders")
+async def new_order(order: Order):
+    (connection, cursor) = start_db()
+    cursor.execute("INSERT INTO orders (timestamp, customer_id, notes) VALUES (?, ?, ?);", (order.timestamp, order.customer_id, order.notes))
+    order_id = cursor.lastrowid
+    for item in order.items:
+        cursor.execute("INSERT INTO item_list (order_id, item_id) VALUES (?, ?);", (order_id, item.id))
+    end_db(connection)
+    return {"message": "Order added"}
+
+@app.get("/orders/{id}")
+async def get_order(id: int):
+    (connection, cursor) = start_db()
+    row = cursor.execute("""
+        SELECT o.id, o.timestamp, o.customer_id, c.name, o.notes, i.id, i.name, i.price
+        FROM orders o
+        JOIN customers c ON o.customer_id = c.id
+        LEFT JOIN item_list il ON o.id = il.order_id
+        LEFT JOIN items i ON il.item_id = i.id
+        WHERE o.id=?;
+    """, (id,)).fetchall()
+    end_db(connection)
+    if len(row) == 0:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    order_id, ts, customer_id, customer_name, notes, item_id, item_name, price = row[0]
+    order = {"id": order_id, "timestamp": ts, "customer_id": customer_id, "customer_name": customer_name, "notes": notes, "items": []}
+    for _, _, _, _, _, item_id, item_name, price in row:
+        if item_id is not None:
+            order["items"].append({"id": item_id, "name": item_name, "price": price})
+
+    return order
 
 
+@app.delete("/orders/{id}")
+async def delete_order(id: int):
+    (connection, cursor) = start_db()
+    cursor.execute("DELETE FROM orders WHERE id=?;", (id,))
+    end_db(connection)
+    return {"message": "Order deleted"}
 
-    
+@app.put("/orders/{id}")
+async def update_order(id: int, order: Order):
+    (connection, cursor) = start_db()
+    cursor.execute("SELECT * FROM orders WHERE id=?;", (id,))
+    if cursor.fetchone() == None:
+        end_db(connection)
+        raise HTTPException(status_code=404, detail="Order not found")
+    cursor.execute("UPDATE orders SET timestamp=?, customer_id=?, notes=? WHERE id=?;", (order.timestamp, order.customer_id, order.notes, id))
+    cursor.execute("DELETE FROM item_list WHERE order_id=?;", (id,))
+    for item in order.items:
+        cursor.execute("INSERT INTO item_list (order_id, item_id) VALUES (?, ?);", (id, item.id))
+    end_db(connection)
+    return {"message": "Order updated"}
+
+@app.get("/items/{id}")
+async def get_item(id: int):
+    (connection, cursor) = start_db()
+    row = cursor.execute("SELECT * FROM items WHERE id=?;", (id,)).fetchone()
+    end_db(connection)
+    if row == None:
+        raise HTTPException(status_code=404, detail="Item not found")
+    return row
+
+@app.put("/items/{id}")
+async def update_item(id: int, item: Item):
+    (connection, cursor) = start_db()
+    cursor.execute("SELECT * FROM items WHERE id=?;", (id,))
+    if cursor.fetchone() == None:
+        end_db(connection)
+        raise HTTPException(status_code=404, detail="Item not found")
+    cursor.execute("UPDATE items SET name=?, price=? WHERE id=?;", (item.name, item.price, id))
+    end_db(connection)
+    return {"message": "Item updated"}
+
+
+@app.delete("/items/{id}")
+async def delete_item(id: int):
+    (connection, cursor) = start_db()
+    cursor.execute("DELETE FROM items WHERE id=?;", (id,))
+    end_db(connection)
+    return {"message": "Item deleted"}
+
+@app.get("/items")
+async def get_all_items():
+    (connection, cursor) = start_db()
+    rows = cursor.execute("SELECT * FROM items;").fetchall()
+    end_db(connection)
+    return rows
+
+@app.post("/items")
+async def new_item(item: Item):
+    (connection, cursor) = start_db()
+    cursor.execute("INSERT INTO items (name, price) VALUES (?, ?);", (item.name, item.price))
+    end_db(connection)
+    return {"message": "Item added"}
+
     
